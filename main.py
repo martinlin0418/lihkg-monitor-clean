@@ -1,64 +1,53 @@
-import os, time, json, requests, threading
+import requests, time, os, threading
 from flask import Flask
 
-CAT_ID = 35
-SEEN_FILE = "seen_ids.json"
-CHECK_INTERVAL = 300
-
-BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+CAT_ID = int(os.getenv("CAT_ID", "35"))
+# 兼容你Render入面叫 BOT_TOKEN 定係 TELEGRAM_BOT_TOKEN 都得
+BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID") or os.getenv("TELEGRAM_CHAT_ID")
 
 app = Flask(__name__)
-@app.route("/")
+
+@app.route('/')
 def home():
-    return "LIHKG Monitor is running!"
+    return f"Bot running cat={CAT_ID} - OK"
 
 def send_tg(text):
-    if not BOT_TOKEN or not CHAT_ID: return
+    if not BOT_TOKEN or not CHAT_ID: 
+        print("未set BOT_TOKEN/CHAT_ID")
+        return
     try:
         requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-                      json={"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown", "disable_web_page_preview": True}, timeout=10)
-    except: pass
+                      json={"chat_id": CHAT_ID, "text": text}, timeout=10)
+    except Exception as e:
+        print(f"TG error {e}")
 
-def load_seen():
-    try:
-        with open(SEEN_FILE, "r") as f: return set(json.load(f))
-    except: return set()
+seen = set()
 
-def save_seen(s):
-    with open(SEEN_FILE, "w") as f: json.dump(list(s)[-1000:], f)
-
-def fetch_threads():
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 Chrome/124.0.0.0 Mobile Safari/537.36",
-        "Referer": "https://lihkg.com/category/35",
-        "Origin": "https://lihkg.com",
-        "X-LI-DEVICE": "0",
-    }
-    url = f"https://lihkg.com/api_v2/thread/category?cat_id={CAT_ID}&page=1&count=60&type=now"
-    r = requests.get(url, headers=headers, timeout=20)
-    r.raise_for_status()
-    return r.json().get("response", {}).get("items", [])
-
-def monitor_loop():
-    seen = load_seen()
-    if len(seen)==0:
-        send_tg("✅ LIHKG Monitor (Render) started!")
+def monitor():
+    print(f"=== Bot started cat={CAT_ID} ===", flush=True)
     while True:
         try:
-            items = fetch_threads()
-            for it in items:
-                tid = str(it.get("thread_id"))
+            url = f"https://lihkg.com/api_v2/thread/category?cat_id={CAT_ID}&page=1&count=10&type=latest"
+            r = requests.get(url, headers={"User-Agent":"Mozilla/5.0","x-li-device":"android"}, timeout=15).json()
+            items = r.get("response",{}).get("items",[])
+            if not items:
+                print("抓唔到LIHKG，可能cat_id錯", flush=True)
+            for t in items:
+                tid = str(t["thread_id"])
                 if tid not in seen:
+                    if len(seen) > 0:
+                        title = t.get("title","")
+                        link = f"https://lihkg.com/thread/{tid}"
+                        send_tg(f"📱 {title}\n{link}")
+                        print(f"PUSH {tid} {title}", flush=True)
                     seen.add(tid)
-                    title = it.get("title","")
-                    link = f"https://lihkg.com/thread/{tid}"
-                    send_tg(f"🆕 [{CAT_ID}] {title}\n{link}")
-                    time.sleep(0.5)
-            save_seen(seen)
-        except Exception as e: print(e)
-        time.sleep(CHECK_INTERVAL)
+            if len(seen) > 200:
+                seen.clear()
+            print(f"checked {len(items)} threads at {time.strftime('%H:%M:%S')}", flush=True)
+        except Exception as e:
+            print(f"Error {e}", flush=True)
+        time.sleep(60)
 
-threading.Thread(target=monitor_loop, daemon=True).start()
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+threading.Thread(target=monitor, daemon=True).start()
+app.run(host="0.0.0.0", port=int(os.getenv("PORT",10000)))
