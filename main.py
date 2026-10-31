@@ -9,7 +9,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return f"Bot running cat={CAT_ID} 15s mode OK"
+    return f"Bot running cat={CAT_ID} 15s clean OK"
 
 def send_tg(text):
     if not BOT_TOKEN or not CHAT_ID:
@@ -36,27 +36,40 @@ def monitor():
             }
             url = f"https://lihkg.com/api_v2/thread/category?cat_id={CAT_ID}&page=1&count=15&type=now"
             r = requests.get(url, headers=headers, timeout=15)
-            data = r.json()
+
+            # 防炸：唔係200或者唔係JSON，直接當被擋
+            if r.status_code != 200 or not r.text.strip().startswith("{"):
+                fail += 1
+                print(f"LIHKG擋咗 status={r.status_code} len={len(r.text)} 瞓{60+fail*20}秒", flush=True)
+                time.sleep(60 + fail*20)
+                continue
+
+            try:
+                data = r.json()
+            except Exception as je:
+                fail += 1
+                print(f"JSON解唔到 {je} 瞓60秒", flush=True)
+                time.sleep(60)
+                continue
+
             items = data.get("response", {}).get("items", [])
 
             if not items:
                 fail += 1
-                sleep_t = 60 + fail * 30
-                print(f"未抓到items，可能被風控，第{fail}次 瞓{sleep_t}秒", flush=True)
-                time.sleep(sleep_t)
+                print(f"未抓到items，可能被風控 第{fail}次 瞓{60+fail*20}秒", flush=True)
+                time.sleep(60 + fail*20)
                 if fail > 3:
                     time.sleep(120)
                 continue
 
             fail = 0
-            
+
             if first_run:
                 for t in items:
                     seen.add(str(t["thread_id"]))
                 first_run = False
-                print(f"初始化完成，記住 {len(seen)} 個舊post，之後先開始推新post", flush=True)
+                print(f"初始化完成，記住 {len(seen)} 個舊post，之後只推新post", flush=True)
             else:
-                # 由舊到新推，唔會亂序
                 for t in reversed(items):
                     tid = str(t["thread_id"])
                     if tid not in seen:
@@ -66,20 +79,18 @@ def monitor():
                         send_tg(f"📱 電訊台\n{title}\n{link}")
                         print(f"PUSH {tid}", flush=True)
 
-            # 清理記憶，唔好一次清晒
             if len(seen) > 500:
                 temp = list(seen)[-400:]
                 seen.clear()
                 for x in temp:
                     seen.add(x)
-                    
+
             print(f"checked {len(items)} at {time.strftime('%H:%M:%S')} latest={items[0]['thread_id']}", flush=True)
 
         except Exception as e:
             print(f"Loop Error: {e}", flush=True)
             time.sleep(30)
 
-        # 終極15秒版核心
         time.sleep(15 + random.randint(2, 5))
 
 threading.Thread(target=monitor, daemon=True).start()
