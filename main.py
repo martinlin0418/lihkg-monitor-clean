@@ -91,7 +91,7 @@ def monitor():
             print(f"Loop Error: {e}", flush=True)
             time.sleep(30)
 
-        time.sleep(15 + random.randint(2, 5))
+        time.sleep(30 + random.randint(2, 5))
 
 threading.Thread(target=monitor, daemon=True).start()
 
