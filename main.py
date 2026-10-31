@@ -1,4 +1,4 @@
-import requests, time, os, threading
+import requests, time, os, threading, random
 from flask import Flask
 
 CAT_ID = int(os.getenv("CAT_ID", "35"))
@@ -35,7 +35,6 @@ def monitor():
             }
             url = f"https://lihkg.com/api_v2/thread/category?cat_id={CAT_ID}&page=1&count=15&type=now"
             r = requests.get(url, headers=headers, timeout=20)
-            # 如果唔係JSON，直接印出黎睇
             if "application/json" not in r.headers.get("Content-Type","") and len(r.text) < 200:
                 print(f"LIHKG回應異常: {r.text[:200]}", flush=True)
                 time.sleep(60)
@@ -60,7 +59,7 @@ def monitor():
                 seen.clear()
         except Exception as e:
             print(f"Loop Error: {e}", flush=True)
-        time.sleep(60)
+        time.sleep(15 + random.randint(2,5))
 
 threading.Thread(target=monitor, daemon=True).start()
 app.run(host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
